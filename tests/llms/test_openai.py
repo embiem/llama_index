@@ -3,10 +3,12 @@ from typing import Any, AsyncGenerator, Generator
 
 import openai
 import pytest
-from llama_index.llms.base import ChatMessage
-from llama_index.llms.openai import OpenAI
+import tiktoken
 from pytest import MonkeyPatch
 
+from llama_index.callbacks import CallbackManager, TokenCountingHandler
+from llama_index.llms.base import ChatMessage
+from llama_index.llms.openai import OpenAI
 from tests.conftest import CachedOpenAIApiKeys
 
 
@@ -208,6 +210,31 @@ async def test_completion_model_async(monkeypatch: MonkeyPatch) -> None:
 
     chat_response = await llm.achat([message])
     assert chat_response.message.content == "\n\nThis is indeed a test"
+
+
+@pytest.mark.asyncio()
+async def test_completion_model_with_token_counter_async(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "llama_index.llms.openai.acompletion_with_retry", mock_async_completion
+    )
+
+    token_encoding = tiktoken.get_encoding("cl100k_base")
+    token_counter = TokenCountingHandler(tokenizer=token_encoding.encode, verbose=True)
+    callback_manager = CallbackManager([token_counter])
+    llm = OpenAI(model="text-davinci-003", callback_manager=callback_manager)
+    prompt = "test prompt"
+    message = ChatMessage(role="user", content="test message")
+
+    await llm.acomplete(prompt)
+    assert token_counter.llm_token_counts[0].completion == "\n\nThis is indeed a test"
+
+    await llm.achat([message])
+    assert (
+        token_counter.llm_token_counts[1].completion
+        == "assistant: \n\nThis is indeed a test"
+    )
 
 
 @pytest.mark.asyncio()
